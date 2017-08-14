@@ -17,7 +17,7 @@
 
 package org.apache.iota.fey
 
-import java.io.{BufferedWriter, File, FileWriter}
+import java.io.{File, FileOutputStream}
 import java.net.{URL, URLClassLoader}
 import java.nio.file.{Files, Paths}
 
@@ -138,7 +138,9 @@ protected object Utils {
           else {
             val file = new File(s"$CHECKPOINT_DIR/${orchestrationID}.json")
             if (!file.createNewFile()) {
+              log.info(s"DELETING FROM CHECKPOINT ${orchestrationID}")
               file.delete()
+              log.info(s"DELETED FROM CHECKPOINT ${orchestrationID}")
             }
             ORCHESTRATION_CACHE.orchestration_metadata.remove(orchestrationID)
             ORCHESTRATION_CACHE.orchestration_globals.remove(orchestrationID)
@@ -148,30 +150,42 @@ protected object Utils {
           ORCHESTRATION_CACHE.orchestration_metadata.get(orchestrationID) match {
             case None => log.warn(s"Could not save state for Orchestration ${orchestrationID}. No metadata defined.")
             case Some(metadata) =>
-              val ensembleJSON = metadata.map(ensenble => ensenble._2)
-              val name: String = ORCHESTRATION_CACHE.orchestration_name.getOrElse(orchestrationID, "NOT SAVED")
-              val globals = ORCHESTRATION_CACHE.orchestration_globals.getOrElse(orchestrationID, HashMap.empty).map(global => global._2)
+              try {
+                val ensembleJSON = metadata.map(ensenble => ensenble._2)
+                val name: String = ORCHESTRATION_CACHE.orchestration_name.getOrElse(orchestrationID, "NOT SAVED")
+                val globals = ORCHESTRATION_CACHE.orchestration_globals.getOrElse(orchestrationID, HashMap.empty).map(global => global._2)
 
-              val orchestrationSpec = Json.obj(JSON_PATH.GUID -> orchestrationID,
-                JSON_PATH.COMMAND -> "RECREATE",
-                JSON_PATH.ORCHESTRATION_NAME -> name,
-                JSON_PATH.ORCHESTRATION_TIMESTAMP -> System.currentTimeMillis.toString,
-                JSON_PATH.GLOBAL_PERFORMERS -> globals,
-                JSON_PATH.ENSEMBLES -> ensembleJSON
-              )
+                val orchestrationSpec = Json.obj(JSON_PATH.GUID -> orchestrationID,
+                  JSON_PATH.COMMAND -> "RECREATE",
+                  JSON_PATH.ORCHESTRATION_NAME -> name,
+                  JSON_PATH.ORCHESTRATION_TIMESTAMP -> System.currentTimeMillis.toString,
+                  JSON_PATH.GLOBAL_PERFORMERS -> globals,
+                  JSON_PATH.ENSEMBLES -> ensembleJSON)
 
-              val file = new File(s"$CHECKPOINT_DIR/${orchestrationID}.json")
-              file.getParentFile().mkdirs()
-              file.createNewFile()
-              val bw = new BufferedWriter(new FileWriter(file))
-              bw.write(Json.stringify(orchestrationSpec))
-              bw.close()
-              log.info(s"Orchestration ${orchestrationID} saved.")
+                saveCheckpointFile(Json.stringify(orchestrationSpec), orchestrationID)
+
+                log.info(s"Orchestration ${orchestrationID} saved.")
+              } catch {
+                case e: Exception => log.error("Could not manage checkpoint", e)
+              }
           }
       }
     }else{
       log.debug("Checkpoint not enabled")
     }
+  }
+
+  def saveCheckpointFile(json: String, id: String): Unit ={
+    val file = new File(s"$CHECKPOINT_DIR/${id}.json")
+    file.getParentFile().mkdirs()
+    file.createNewFile()
+
+    val fos = new FileOutputStream(file)
+    val fd = fos.getFD()
+    fos.write(json.getBytes)
+    fos.flush()
+    fd.sync()
+    fos.close()
   }
 
   /**
