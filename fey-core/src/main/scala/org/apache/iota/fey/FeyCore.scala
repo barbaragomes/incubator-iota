@@ -127,6 +127,9 @@ protected class FeyCore extends Actor with ActorLogging{
     monitoring_actor ! Monitor.TERMINATE(actorRef.path.toString, Utils.getTimestamp)
     log.info(s"TERMINATED ${actorRef.path.name}")
     FEY_CACHE.activeOrchestrations.remove(actorRef.path.name)
+    if(!FEY_CACHE.orchestrationsToBeDeleted.isEmpty){
+      removeOrchestrationDataFromFey(actorRef.path.name)
+    }
     ORCHESTRATION_CACHE.orchestration_metadata.remove(actorRef.path.name)
     ORCHESTRATION_CACHE.orchestration_globals.remove(actorRef.path.name)
     GlobalPerformer.activeGlobalPerformers.remove(actorRef.path.name)
@@ -142,6 +145,7 @@ protected class FeyCore extends Actor with ActorLogging{
     monitoring_actor ! Monitor.STOP(Utils.getTimestamp)
     FEY_CACHE.activeOrchestrations.clear()
     FEY_CACHE.orchestrationsAwaitingTermination.clear()
+    FEY_CACHE.orchestrationsToBeDeleted.clear()
     ORCHESTRATION_CACHE.orchestration_metadata.clear()
   }
 
@@ -242,6 +246,18 @@ protected class FeyCore extends Actor with ActorLogging{
     }
   }
 
+  private def removeOrchestrationDataFromFey(terminatedOrchestrationName: String) = {
+    FEY_CACHE.orchestrationsToBeDeleted.get(terminatedOrchestrationName) match {
+      case Some(updateCheckpoint) =>
+        log.info(s"Cleaning up orchestration data on fey after DELETE message: ${terminatedOrchestrationName}")
+        FEY_CACHE.orchestrationsToBeDeleted.remove(terminatedOrchestrationName)
+        if(updateCheckpoint) {
+          updateOrchestrationState(terminatedOrchestrationName, true)
+        }
+      case None =>
+    }
+  }
+
   /**
     * Creates a Orchestration according to the JSON spec.
     * If any exception happens during the creation, the orchestration actor will be killed
@@ -294,11 +310,9 @@ protected class FeyCore extends Actor with ActorLogging{
     try{
       FEY_CACHE.activeOrchestrations.get(orchestrationID) match {
         case Some(orchestration) =>
+          log.info(s"Stopping active orchestration ${orchestrationID}")
+          FEY_CACHE.orchestrationsToBeDeleted.put(orchestrationID, updateCheckpoint)
           orchestration._2 ! PoisonPill
-          FEY_CACHE.activeOrchestrations.remove(orchestrationID)
-          if(updateCheckpoint) {
-            updateOrchestrationState(orchestrationID, true)
-          }
         case None =>
           log.warning(s"No active Orchestration $orchestrationID to be deleted")
       }
@@ -395,6 +409,13 @@ private object FEY_CACHE{
     * [OrchestrationID, (Orchestration Timestamp, Orchestration ActorRef)]
     */
   val activeOrchestrations:HashMap[String, (String, ActorRef)] = HashMap.empty[String, (String, ActorRef)]
+
+  /**
+    * Keeps a list of the orchestrations that are waiting for termination so then can be complete deleted from fey
+    * Boolean: update checkpoint
+    * Used mainly inside the Terminated
+    */
+  val orchestrationsToBeDeleted:HashMap[String, Boolean] = HashMap.empty[String, Boolean]
 
   /**
     * Keeps a list of the orchestrations that are waiting for termination so then can be restarted
