@@ -17,12 +17,14 @@
  */
 
 package org.apache.iota.fey
-
+import scala.concurrent.ExecutionContext.Implicits.global
 import java.nio.file.{FileSystems, Path, WatchEvent}
 import java.nio.file.StandardWatchEventKinds._
 import akka.actor.ActorRef
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.HashMap
+import akka.pattern.ask
+import scala.concurrent.duration._
 
 class GlobalWatchServiceTask(parentActor: ActorRef) extends Runnable {
 
@@ -103,14 +105,63 @@ class GlobalWatchServiceTask(parentActor: ActorRef) extends Runnable {
   private def broadcastToActors(actors: Array[ActorRef], event: WatchEvent.Kind[_], path: Path) = {
     actors.foreach( actor => {
       event match {
-        case ENTRY_CREATE => actor ! GlobalWatchService.ENTRY_CREATED(path)
-        case ENTRY_MODIFY => actor ! GlobalWatchService.ENTRY_MODIFIED(path)
-        case ENTRY_DELETE => actor ! GlobalWatchService.ENTRY_DELETED(path)
+        case ENTRY_CREATE => broadcastToActorMsgCreate(actor, path, 0)
+        case ENTRY_MODIFY => broadcastToActorMsgModify(actor, path, 0)
+        case ENTRY_DELETE => broadcastToActorMsgDelete(actor, path, 0)
         case x => log.warn(s"Event unknown $x")
       }
     })
   }
+
+  private def broadcastToActorMsgDelete(actor: ActorRef, path:Path, retry: Int): Unit ={
+    try {
+      if(retry < 5) {
+        val f = actor.ask(GlobalWatchService.ENTRY_DELETED(path))(5.seconds)
+        f onFailure {
+          case e: Exception =>
+            log.error(s"WATCH DIR MESSAGE DELETE NOT DELIVERED: RETRYING ${retry}")
+            log.warn(s"FILE: ${path.toString} ==> Actor: ${actor.path}")
+            broadcastToActorMsgCreate(actor, path, (retry + 1))
+        }
+      }
+    }catch{
+      case e: Exception =>
+    }
+  }
+
+  private def broadcastToActorMsgCreate(actor: ActorRef, path:Path, retry: Int): Unit ={
+    try {
+      if(retry < 5) {
+        val f = actor.ask(GlobalWatchService.ENTRY_CREATED(path))(5.seconds)
+        f onFailure {
+          case e: Exception =>
+            log.error(s"WATCH DIR MESSAGE CREATED NOT DELIVERED: RETRYING ${retry}")
+            log.warn(s"FILE: ${path.toString} ==> Actor: ${actor.path}")
+            broadcastToActorMsgCreate(actor, path, (retry + 1))
+        }
+      }
+    }catch{
+      case e: Exception =>
+    }
+  }
+
+  private def broadcastToActorMsgModify(actor: ActorRef, path:Path, retry: Int): Unit ={
+    try {
+      if(retry < 5) {
+        val f = actor.ask(GlobalWatchService.ENTRY_MODIFIED(path))(5.seconds)
+        f onFailure {
+          case e: Exception =>
+            log.error(s"WATCH DIR MESSAGE MODIFY NOT DELIVERED: RETRYING ${retry}")
+            log.warn(s"FILE: ${path.toString} ==> Actor: ${actor.path}")
+            broadcastToActorMsgCreate(actor, path, (retry + 1))
+        }
+      }
+    }catch{
+      case e: Exception =>
+    }
+  }
 }
+
 
 private object WatchingDirectories{
 

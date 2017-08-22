@@ -62,11 +62,23 @@ abstract class FeyGenericActor(val params: Map[String,String] = Map.empty,
 
     case STOP => context.stop(self)
 
-    case ENTRY_CREATED(path) => onReceiveWatcherCreate(path)
+    case ENTRY_CREATED(path) => {
+      sender() ! "WATCH_RECEIVED"
+      log.info(s"WATCH MESSAGE RECEIVED CREATE: $path")
+      onReceiveWatcherCreate(path)
+    }
 
-    case ENTRY_MODIFIED(path) => onReceiveWatcherModify(path)
+    case ENTRY_MODIFIED(path) => {
+      sender() ! "WATCH_RECEIVED"
+      log.info(s"WATCH MESSAGE RECEIVED MODIFY: $path")
+      onReceiveWatcherModify(path)
+    }
 
-    case ENTRY_DELETED(path) => onReceiveWatcherDelete(path)
+    case ENTRY_DELETED(path) => {
+      sender() ! "WATCH_RECEIVED"
+      log.info(s"WATCH MESSAGE RECEIVED DELETE: $path")
+      onReceiveWatcherDelete(path)
+    }
 
     case PROCESS(message) => checkBackoff(message, sender())
 

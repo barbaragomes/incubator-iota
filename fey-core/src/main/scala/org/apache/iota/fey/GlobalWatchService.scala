@@ -17,12 +17,15 @@
  */
 
 package org.apache.iota.fey
-
 import java.nio.file.{Files, Path, Paths, WatchEvent}
+
+import scala.concurrent.ExecutionContext.Implicits.global
 
 import akka.actor.{Actor, ActorLogging, ActorRef}
 import org.apache.iota.fey.GlobalWatchService.REGISTER_WATCHER_PERFORMER
 import org.apache.iota.fey.WatchingDirectories.STOPPED
+import akka.pattern.ask
+import scala.concurrent.duration._
 
 class GlobalWatchService extends Actor with ActorLogging{
 
@@ -66,7 +69,23 @@ class GlobalWatchService extends Actor with ActorLogging{
     val filePath = Paths.get(pathWithFile)
     if(Files.exists(filePath)){
       log.info(s"File $pathWithFile exists. Broadcasting message to actor ${actor.path.toString}")
-      actor ! GlobalWatchService.ENTRY_CREATED(filePath)
+      broadcastToActorMsgCreate(actor, filePath, 0)
+    }
+  }
+
+  private def broadcastToActorMsgCreate(actor: ActorRef, path:Path, retry: Int): Unit ={
+    try {
+      if(retry < 5) {
+        val f = actor.ask(GlobalWatchService.ENTRY_CREATED(path))(5.seconds)
+        f onFailure {
+          case e: Exception =>
+            log.error(s"WATCH DIR MESSAGE CREATED NOT DELIVERED: RETRYING ${retry}")
+            log.warning(s"FILE: ${path.toString} ==> Actor: ${actor.path}")
+            broadcastToActorMsgCreate(actor, path, (retry + 1))
+        }
+      }
+    }catch{
+        case e: Exception =>
     }
   }
 
